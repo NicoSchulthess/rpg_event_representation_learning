@@ -11,6 +11,9 @@ from torch.utils.tensorboard import SummaryWriter
 from utils.loader import Loader
 from utils.loss import cross_entropy_loss_and_accuracy
 from utils.dataset import NCaltech101
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 torch.manual_seed(1)
@@ -57,6 +60,17 @@ def FLAGS():
 
     return flags
 
+
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+
+def cleanup():
+    dist.destroy_process_group()
+
 def percentile(t, q):
     B, C, H, W = t.shape
     k = 1 + round(.01 * float(q) * (C * H * W - 1))
@@ -80,8 +94,10 @@ def create_image(representation):
     return representation
 
 
-if __name__ == '__main__':
-    flags = FLAGS()
+
+def train(rank, world_size, flags):
+
+    setup(rank, world_size)
 
     # datasets, add augmentation to training set
     training_dataset = NCaltech101(flags.training_dataset, augmentation=True)
@@ -95,6 +111,9 @@ if __name__ == '__main__':
 
     # model, and put to device
     model = Classifier(num_classes=len(training_dataset.classes))
+    model = model.to(rank)
+
+    model = DDP(model, device_ids=[rank])
 
     # optimizer and lr scheduler
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -115,6 +134,8 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(validation_loader):
 
             with torch.no_grad():
+                events = events.to(rank)
+                labels = events.to(labels)
                 pred_labels, representation = model(events)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
@@ -163,6 +184,8 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(testing_loader):
 
             with torch.no_grad():
+                events = events.to(rank)
+                labels = labels.to(rank)
                 pred_labels, representation = model(events)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
@@ -191,6 +214,9 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(training_loader):
             optimizer.zero_grad()
 
+            events = events.to(rank)
+            labels = labels.to(rank)
+
             pred_labels, representation = model(events)
             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
@@ -216,3 +242,21 @@ if __name__ == '__main__':
         representation_vizualization = create_image(representation)
         writer.add_image("training/representation", representation_vizualization, iteration)
         writer.flush()
+
+        cleanup()
+
+
+def run_demo(demo_fn, world_size, flags):
+    mp.spawn(demo_fn,
+             args=(world_size, flags),
+             nprocs=world_size,
+             join=True)
+        
+
+if __name__ == '__main__':
+    flags = FLAGS()
+
+    n_gpus = torch.cuda.device_count()
+    world_size = n_gpus
+    run_demo(train, world_size, flags)
+
