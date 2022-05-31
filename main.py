@@ -40,6 +40,8 @@ def FLAGS():
     
     parser.add_argument("--continue_from", default=None)
 
+    parser.add_argument("--use_hp", default=False)
+
     flags = parser.parse_args()
 
     os.makedirs(flags.log_dir, exist_ok=True)
@@ -121,6 +123,8 @@ if __name__ == '__main__':
         start_epoch = 0
     
     model = model.to(flags.device)
+    if flags.use_hp:
+        model = model.half()
 
     # optimizer and lr scheduler
     optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr)
@@ -145,6 +149,9 @@ if __name__ == '__main__':
                 continue
 
             optimizer.zero_grad()
+
+            if flags.use_hp:
+                events = events.half()
 
             pred_labels, representation = model(events)
             loss, accuracy = cross_entropy_loss_and_accuracy(

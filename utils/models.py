@@ -111,11 +111,11 @@ class QuantizationLayer(nn.Module):
 
             p = (p+1)/2  # maps polarity to 0, 1
 
-            idx_before_bins = x \
-                + W * y \
+            idx_before_bins = x.float() \
+                + W * y.float() \
                 + 0 \
-                + W * H * C * p \
-                + W * H * C * 2 * b
+                + W * H * C * p.float() \
+                + W * H * C * 2 * b.float()
 
             for i_bin in range(C):
                 values = t * self.value_layer.forward(t-i_bin/(C-1))
