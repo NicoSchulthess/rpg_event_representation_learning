@@ -56,6 +56,7 @@ def FLAGS():
           f"batch_size: {flags.batch_size}\n"
           f"lr: {flags.lr}\n"
           f"device: {flags.device}\n"
+          f"use half precision: {flags.use_hp}\n"
           f"log_dir: {flags.log_dir}\n"
           f"training_dataset: {flags.training_dataset}\n"
           f"validation_dataset: {flags.validation_dataset}\n"
@@ -75,7 +76,7 @@ def create_image(representation):
     representation = representation.view(B, 3, C // 3, H, W).sum(2)
 
     # do robust min max norm
-    representation = representation.detach().cpu()
+    representation = representation.detach().cpu().float()
     robust_max_vals = percentile(representation, 99)
     robust_min_vals = percentile(representation, 1)
 
@@ -127,7 +128,8 @@ if __name__ == '__main__':
         model = model.half()
 
     # optimizer and lr scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr)
+    eps = 1e-4 if flags.use_hp else 1e-8
+    optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr, eps=eps)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.5)
 
     os.makedirs(flags.log_dir, exist_ok=True)
@@ -150,10 +152,7 @@ if __name__ == '__main__':
 
             optimizer.zero_grad()
 
-            if flags.use_hp:
-                events = events.half()
-
-            pred_labels, representation = model(events)
+            pred_labels, representation = model(events, test=True, use_hp=flags.use_hp)
             loss, accuracy = cross_entropy_loss_and_accuracy(
                 pred_labels, labels)
 
@@ -194,7 +193,7 @@ if __name__ == '__main__':
                 continue
 
             with torch.no_grad():
-                pred_labels, representation = model(events, test=True)
+                pred_labels, representation = model(events, test=True, use_hp=flags.use_hp)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             sum_accuracy += accuracy.detach()
@@ -245,7 +244,7 @@ if __name__ == '__main__':
                 continue
 
             with torch.no_grad():
-                pred_labels, representation = model(events, test=True)
+                pred_labels, representation = model(events, test=True, use_hp=flags.use_hp)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             sum_accuracy += accuracy.detach()

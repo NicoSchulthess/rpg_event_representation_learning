@@ -89,7 +89,7 @@ class QuantizationLayer(nn.Module):
                                       num_channels=dim[0])
         self.dim = dim
 
-    def forward(self, events, test=False):
+    def forward(self, events, test=False, use_hp=False):
         if test:
             events = events.reshape([-1, 5])
             events = events[events[..., -1] != -1]
@@ -97,8 +97,9 @@ class QuantizationLayer(nn.Module):
             # points is a list, since events can have any size
             B = events[:, -1].unique().cpu().numpy().astype(int)
             num_voxels = int(2 * np.prod(self.dim) * len(B))
+            vox_dtype = torch.half if use_hp else events.dtype
             vox = torch.full([num_voxels, ], fill_value=0,
-                            dtype=events.dtype, device=events.device)
+                             dtype=vox_dtype, device=events.device)
             C, H, W = self.dim
 
             # get values for each channel
@@ -109,13 +110,16 @@ class QuantizationLayer(nn.Module):
                 t[events[:, -1] == bi] /= t[events[:, -1] == bi].max()
                 b[b == bi] = i
 
+            if use_hp:
+                t = t.half()
+
             p = (p+1)/2  # maps polarity to 0, 1
 
-            idx_before_bins = x.float() \
-                + W * y.float() \
+            idx_before_bins = x \
+                + W * y \
                 + 0 \
-                + W * H * C * p.float() \
-                + W * H * C * 2 * b.float()
+                + W * H * C * p \
+                + W * H * C * 2 * b
 
             for i_bin in range(C):
                 values = t * self.value_layer.forward(t-i_bin/(C-1))
@@ -203,8 +207,8 @@ class Classifier(nn.Module):
 
         return x
 
-    def forward(self, x, test=False):
-        vox = self.quantization_layer.forward(x, True)
+    def forward(self, x, test=False, use_hp=False):
+        vox = self.quantization_layer.forward(x, True, use_hp)
         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
         pred = self.classifier.forward(vox_cropped)
         return pred, vox
