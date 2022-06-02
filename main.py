@@ -33,6 +33,7 @@ def FLAGS():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--pin_memory", type=bool, default=True)
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--accumulate_grad_over", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-4)
 
     parser.add_argument("--num_epochs", type=int, default=30)
@@ -50,18 +51,18 @@ def FLAGS():
     assert os.path.isdir(flags.training_dataset), f"Training dataset directory {flags.training_dataset} not found."
     assert os.path.isdir(flags.testing_dataset), f"Testing dataset directory {flags.testing_dataset} not found."
 
-    print(f"----------------------------\n"
-          f"Starting training with \n"
-          f"num_epochs: {flags.num_epochs}\n"
-          f"batch_size: {flags.batch_size}\n"
-          f"lr: {flags.lr}\n"
-          f"device: {flags.device}\n"
-          f"use half precision: {flags.use_hp}\n"
-          f"log_dir: {flags.log_dir}\n"
-          f"training_dataset: {flags.training_dataset}\n"
-          f"validation_dataset: {flags.validation_dataset}\n"
-          f"testing_dataset: {flags.testing_dataset}\n"
-          f"----------------------------")
+    with open(os.path.join(flags.log_dir, 'config.txt'), 'w') as f:
+        f.write(f"Starting training with \n")
+        f.write(f"num_epochs: {flags.num_epochs}\n")
+        f.write(f"batch_size: {flags.batch_size}\n")
+        f.write(f"accumulate_grad_over: {flags.accumulate_grad_over}\n")
+        f.write(f"lr: {flags.lr}\n")
+        f.write(f"device: {flags.device}\n")
+        f.write(f"use_hp: {flags.use_hp}\n")
+        f.write(f"log_dir: {flags.log_dir}\n")
+        f.write(f"training_dataset: {flags.training_dataset}\n")
+        f.write(f"validation_dataset: {flags.validation_dataset}\n")
+        f.write(f"testing_dataset: {flags.testing_dataset}\n")
 
     return flags
 
@@ -146,19 +147,24 @@ if __name__ == '__main__':
 
         model = model.train()
         print(f"Training step [{i:3d}/{flags.num_epochs:3d}]")
-        for events, labels in tqdm.tqdm(training_loader):
+        for j, (events, labels) in tqdm.tqdm(
+            enumerate(training_loader), total=len(training_loader)):
             if events.size == 0:
                 continue
-
-            optimizer.zero_grad()
+            
+            if j % flags.accumulate_grad_over == 0:
+                optimizer.zero_grad()
 
             pred_labels, representation = model(events, test=True, use_hp=flags.use_hp)
             loss, accuracy = cross_entropy_loss_and_accuracy(
                 pred_labels, labels)
 
+            loss /= flags.accumulate_grad_over
+
             loss.backward()
 
-            optimizer.step()
+            if (j + 1) % flags.accumulate_grad_over == 0:
+                optimizer.step()
 
             sum_accuracy += accuracy.detach()
             sum_loss += loss.detach()
