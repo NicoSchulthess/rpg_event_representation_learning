@@ -208,7 +208,7 @@ class Classifier(nn.Module):
         return x
 
     def forward(self, x, test=False, use_hp=False):
-        vox = self.quantization_layer.forward(x, True, use_hp)
+        vox = self.quantization_layer.forward(x, test, use_hp)
         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
         pred = self.classifier.forward(vox_cropped)
         return pred, vox
